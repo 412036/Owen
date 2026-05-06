@@ -1,328 +1,329 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithCustomToken, 
-  signInAnonymously, 
-  onAuthStateChanged,
-  GoogleAuthProvider,
-  signInWithPopup,
-  signOut
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  collection, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc,
-  query,
-  where
-} from 'firebase/firestore';
-import { 
-  LayoutGrid, Database, Heart, TrendingUp, Search, Bell, Plus, 
-  ChevronLeft, Filter, List, Grid, Upload, CheckCircle2, 
-  ExternalLink, ArrowUpRight, ShieldCheck, Target, Activity, 
-  LogOut, LogIn, TrendingDown, History, PieChart, BellRing, ShoppingBag
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>珍藏大師 TreasureMaster - 雲端收藏管理</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #F8FAFC; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .loader { border-top-color: transparent; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
 
-// Firebase 配置
-const firebaseConfig = {
-  apiKey: "AIzaSyAV1feMf2mG9yTHN4bnvTSCUwB6VyWSakM",
-  authDomain: "owen-a263b.firebaseapp.com",
-  projectId: "owen-a263b",
-  storageBucket: "owen-a263b.firebasestorage.app",
-  messagingSenderId: "1013481513026",
-  appId: "1:1013481513026:web:afda76b6571506a4734ddb",
-  measurementId: "G-JEMCSLPLT2"
-};
-
-// 初始化 Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-const App = () => {
-  const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadSuccess, setUploadSuccess] = useState(false);
-  const [uploadContext, setUploadContext] = useState('');
-  
-  // 業務數據狀態
-  const [collectionsData, setCollectionsData] = useState([]);
-  const [wishlistData, setWishlistData] = useState([]);
-  const [activitiesData, setActivitiesData] = useState([]);
-
-  const fileInputRef = useRef(null);
-
-  // 1. 初始化身分驗證 (Rule 3)
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          // 若無 Token 則嘗試匿名登入以確保持續運作
-          if (!auth.currentUser) await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Auth error:", err);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 2. 監聽 Firestore 數據 (Rule 1 & 2)
-  useEffect(() => {
-    if (!user) return;
-
-    const basePath = ['artifacts', appId, 'users', user.uid];
-    
-    // 監聽收藏品
-    const unsubCol = onSnapshot(
-      collection(db, ...basePath, 'collections'),
-      (snap) => {
-        const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setCollectionsData(items);
-      },
-      (err) => console.error("Firestore Collections Error:", err)
-    );
-
-    // 監聽願望清單
-    const unsubWish = onSnapshot(
-      collection(db, ...basePath, 'wishlist'),
-      (snap) => {
-        const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setWishlistData(items);
-      },
-      (err) => console.error("Firestore Wishlist Error:", err)
-    );
-
-    // 監聽動態
-    const unsubAct = onSnapshot(
-      collection(db, ...basePath, 'activities'),
-      (snap) => {
-        const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        // 在記憶體中排序 (Rule 2: No complex queries)
-        setActivitiesData(items.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
-      },
-      (err) => console.error("Firestore Activities Error:", err)
-    );
-
-    return () => { unsubCol(); unsubWish(); unsubAct(); };
-  }, [user]);
-
-  // Google 登入功能
-  const handleGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Login Error:", error);
-    }
-  };
-
-  const handleLogout = () => signOut(auth);
-
-  // 處理圖片轉 Base64 並上傳
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file || !user) return;
-
-    setUploadContext(`正在處理由 ${user.displayName || '用戶'} 上傳的: ${file.name}`);
-    setIsUploading(true);
-
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64String = reader.result;
-      
-      try {
-        // 儲存至 Firestore
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'collections'), {
-          title: file.name.split('.')[0],
-          img: base64String,
-          date: new Date().toISOString().split('T')[0],
-          price: "NT$ 待估價",
-          tags: ["新上傳"],
-          type: "general",
-          timestamp: Date.now()
-        });
-
-        setIsUploading(false);
-        setUploadSuccess(true);
-        setTimeout(() => setUploadSuccess(false), 2000);
-      } catch (err) {
-        console.error("Upload Error:", err);
-        setIsUploading(false);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const triggerUpload = () => fileInputRef.current.click();
-
-  // 渲染組件 (簡化重複樣式)
-  const NavItem = ({ id, icon: Icon, label }) => (
-    <button
-      onClick={() => setActiveTab(id)}
-      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
-        activeTab === id ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-100'
-      }`}
-    >
-      <Icon size={20} />
-      <span className="font-medium text-sm">{label}</span>
-    </button>
-  );
-
-  return (
-    <div className="flex h-screen bg-[#F8FAFC] font-sans text-gray-800 overflow-hidden relative">
-      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
-
-      {/* 通知 */}
-      {(isUploading || uploadSuccess) && (
-        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50">
-          <div className={`flex items-center space-x-4 px-8 py-4 rounded-3xl shadow-2xl border-2 bg-white ${isUploading ? 'border-blue-500 text-blue-600' : 'border-green-500 text-green-600'}`}>
-            {isUploading ? <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent animate-spin rounded-full"></div> : <CheckCircle2 size={24} />}
-            <span className="font-black text-sm uppercase tracking-widest">{isUploading ? '正在上傳雲端...' : '資料已同步至 Firestore'}</span>
-          </div>
+    <!-- 通知系統 -->
+    <div id="notification" class="fixed top-8 left-1/2 -translate-x-1/2 z-50 hidden transition-all duration-300">
+        <div id="notification-card" class="flex items-center space-x-4 px-8 py-4 rounded-3xl shadow-2xl border-2 bg-white">
+            <div id="notif-spinner" class="w-5 h-5 border-2 border-blue-600 border-t-transparent animate-spin rounded-full"></div>
+            <i id="notif-icon" data-lucide="check-circle-2" class="hidden text-green-600"></i>
+            <span id="notif-text" class="font-black text-sm uppercase tracking-widest text-blue-600">處理中...</span>
         </div>
-      )}
+    </div>
 
-      {/* 側邊導覽 */}
-      <aside className="w-72 bg-white border-r border-slate-100 flex flex-col p-8 space-y-10 shrink-0">
-        <div className="flex items-center space-x-3 px-2">
-          <div className="bg-blue-600 p-2 rounded-2xl shadow-lg"><Database className="text-white" size={24} /></div>
-          <h1 className="text-2xl font-black tracking-tighter">珍藏大師</h1>
+    <!-- 側邊導覽列 -->
+    <aside class="w-72 bg-white border-r border-slate-100 flex flex-col p-8 space-y-10 shrink-0">
+        <div class="flex items-center space-x-3 px-2">
+            <div class="bg-blue-600 p-2 rounded-2xl shadow-lg shadow-blue-100">
+                <i data-lucide="database" class="text-white"></i>
+            </div>
+            <h1 class="text-2xl font-black tracking-tighter text-slate-900">珍藏大師</h1>
         </div>
-        <nav className="flex-1 space-y-3">
-          <NavItem id="dashboard" icon={LayoutGrid} label="控制面板總覽" />
-          <NavItem id="collections" icon={Database} label="個人資產庫" />
-          <NavItem id="wishlist" icon={Heart} label="願望與市場追蹤" />
-          <NavItem id="analysis" icon={TrendingUp} label="資產價值動態" />
-        </nav>
         
-        <div className="pt-8 border-t border-slate-50">
-          {!user?.isAnonymous && user ? (
-            <button onClick={handleLogout} className="w-full flex items-center justify-center space-x-2 p-4 bg-slate-100 rounded-2xl text-slate-600 font-bold hover:bg-red-50 hover:text-red-600 transition-all">
-              <LogOut size={18} />
-              <span>登出系統</span>
+        <nav class="flex-1 space-y-3">
+            <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all bg-blue-600 text-white shadow-lg">
+                <i data-lucide="layout-grid"></i>
+                <span class="font-medium text-sm">控制面板總覽</span>
             </button>
-          ) : (
-            <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center space-x-2 p-4 bg-blue-600 rounded-2xl text-white font-bold hover:bg-blue-700 shadow-lg transition-all">
-              <LogIn size={18} />
-              <span>Google 登入同步</span>
+            <button onclick="switchTab('collections')" id="nav-collections" class="nav-item w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all text-gray-500 hover:bg-gray-100">
+                <i data-lucide="database"></i>
+                <span class="font-medium text-sm">個人資產庫</span>
             </button>
-          )}
-        </div>
-      </aside>
+            <button onclick="switchTab('wishlist')" id="nav-wishlist" class="nav-item w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all text-gray-500 hover:bg-gray-100">
+                <i data-lucide="heart"></i>
+                <span class="font-medium text-sm">願望與市場追蹤</span>
+            </button>
+            <button onclick="switchTab('analysis')" id="nav-analysis" class="nav-item w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all text-gray-500 hover:bg-gray-100">
+                <i data-lucide="trending-up"></i>
+                <span class="font-medium text-sm">資產價值動態</span>
+            </button>
+        </nav>
 
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-24 flex items-center justify-between px-12 shrink-0">
-          <div className="relative w-[480px]">
-            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
-            <input type="text" placeholder="搜尋您的雲端收藏..." className="w-full bg-slate-100 border-none rounded-2xl py-3.5 pl-14 pr-6 text-sm font-bold outline-none" />
-          </div>
-          <div className="flex items-center space-x-6">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs font-black text-slate-400 uppercase tracking-widest">目前帳號</p>
-              <p className="text-sm font-bold text-slate-700">{user?.displayName || (user?.isAnonymous ? "訪客模式" : "未登入")}</p>
+        <div class="pt-8 border-t border-slate-50">
+            <div id="auth-section">
+                <button id="btn-login" class="w-full flex items-center justify-center space-x-2 p-4 bg-blue-600 rounded-2xl text-white font-bold hover:bg-blue-700 shadow-lg transition-all">
+                    <i data-lucide="log-in"></i>
+                    <span>Google 登入同步</span>
+                </button>
             </div>
-            <div className="w-12 h-12 rounded-full overflow-hidden ring-4 ring-white shadow-sm">
-              <img src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`} alt="User" />
+        </div>
+    </aside>
+
+    <!-- 主內容區 -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+        <header class="h-24 flex items-center justify-between px-12 shrink-0">
+            <div class="relative w-[480px]">
+                <i data-lucide="search" class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-300"></i>
+                <input type="text" placeholder="搜尋您的雲端收藏..." class="w-full bg-slate-100 border-none rounded-2xl py-3.5 pl-14 pr-6 text-sm font-bold outline-none">
             </div>
-          </div>
+            <div class="flex items-center space-x-6">
+                <div class="text-right hidden sm:block">
+                    <p class="text-xs font-black text-slate-400 uppercase tracking-widest">目前帳號</p>
+                    <p id="user-name" class="text-sm font-bold text-slate-700">訪客模式</p>
+                </div>
+                <div class="w-12 h-12 rounded-full overflow-hidden ring-4 ring-white shadow-sm">
+                    <img id="user-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=default" alt="User">
+                </div>
+            </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-12 pb-12">
-          {activeTab === 'dashboard' && (
-             <div className="space-y-8 animate-in fade-in duration-500">
-               <h2 className="text-2xl font-black">歡迎回來，{user?.displayName || '收藏家'}</h2>
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                 <div className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-50 h-40 flex flex-col justify-between">
-                   <p className="text-slate-400 text-[10px] font-black uppercase">私有藏品數量</p>
-                   <h3 className="text-4xl font-black text-blue-600">{collectionsData.length} <span className="text-lg text-slate-400">件</span></h3>
-                 </div>
-                 <div className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-50 h-40 flex flex-col justify-between">
-                   <p className="text-slate-400 text-[10px] font-black uppercase">願望清單</p>
-                   <h3 className="text-4xl font-black text-purple-600">{wishlistData.length} <span className="text-lg text-slate-400">項</span></h3>
-                 </div>
-                 <div className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-50 h-40 flex flex-col justify-between">
-                   <p className="text-slate-400 text-[10px] font-black uppercase">系統狀態</p>
-                   <h3 className="text-xl font-black text-green-500 flex items-center space-x-2"><ShieldCheck /> <span>雲端已加密</span></h3>
-                 </div>
-               </div>
-             </div>
-          )}
-
-          {activeTab === 'collections' && (
-            <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-black">個人資產庫 ({collectionsData.length})</h2>
-                <button onClick={triggerUpload} className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black text-sm flex items-center space-x-2 hover:bg-blue-700 transition-all shadow-xl shadow-blue-100">
-                  <Plus size={18} /><span>新增雲端資產</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-                {collectionsData.map((item) => (
-                  <div key={item.id} className="bg-white rounded-[32px] shadow-sm border border-slate-50 overflow-hidden group hover:shadow-xl transition-all">
-                    <div className="h-56 relative overflow-hidden bg-slate-100">
-                      <img src={item.img} alt={item.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                      <div className="absolute bottom-4 left-4 flex space-x-1">
-                        {item.tags?.map((tag, i) => (
-                          <span key={i} className="text-[10px] font-black bg-black/50 text-white px-2 py-1 rounded-md backdrop-blur-sm uppercase">{tag}</span>
-                        ))}
-                      </div>
+        <div class="flex-1 overflow-y-auto px-12 pb-12">
+            <!-- Dashboard Tab -->
+            <div id="tab-dashboard" class="tab-content active space-y-8 animate-in fade-in duration-500">
+                <h2 class="text-2xl font-black">歡迎回來，<span id="welcome-name">收藏家</span></h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div class="bg-white p-8 rounded-[32px] shadow-sm border border-slate-50 h-40 flex flex-col justify-between">
+                        <p class="text-slate-400 text-[10px] font-black uppercase">私有藏品數量</p>
+                        <h3 class="text-4xl font-black text-blue-600"><span id="stats-count">0</span> <span class="text-lg text-slate-400">件</span></h3>
                     </div>
-                    <div className="p-6">
-                      <h4 className="font-black text-slate-800 mb-4 truncate">{item.title}</h4>
-                      <div className="flex justify-between items-center border-t border-slate-50 pt-4">
-                        <span className="text-xs font-bold text-slate-400">{item.date}</span>
-                        <span className="text-blue-600 font-black text-sm">{item.price}</span>
-                      </div>
+                    <div class="bg-white p-8 rounded-[32px] shadow-sm border border-slate-50 h-40 flex flex-col justify-between">
+                        <p class="text-slate-400 text-[10px] font-black uppercase">雲端同步狀態</p>
+                        <h3 class="text-xl font-black text-green-500 flex items-center space-x-2">
+                            <i data-lucide="shield-check"></i> <span>已加密連接</span>
+                        </h3>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 其他分頁維持結構，數據由 Firestore 提供... */}
-          {activeTab === 'wishlist' && (
-            <div className="flex flex-col items-center justify-center h-96 text-slate-300">
-              <Heart size={48} className="mb-4 opacity-20" />
-              <p className="font-black uppercase tracking-widest text-sm">願望清單目前為空，快去市場看看吧</p>
-            </div>
-          )}
-          
-          {activeTab === 'analysis' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-700">
-              <div className="bg-white p-10 rounded-[40px] border border-slate-50 shadow-sm">
-                <h3 className="font-black text-xl mb-6 flex items-center space-x-2"><PieChart className="text-blue-600" /><span>雲端資產分佈</span></h3>
-                <div className="h-64 flex items-center justify-center bg-slate-50 rounded-[32px] border-2 border-dashed border-slate-100">
-                  <p className="text-slate-400 font-bold text-sm">正在計算實時市場價值...</p>
+                    <div class="bg-white p-8 rounded-[32px] shadow-sm border border-slate-50 h-40 flex flex-col justify-between">
+                        <p class="text-slate-400 text-[10px] font-black uppercase">資產總估值</p>
+                        <h3 class="text-2xl font-black text-slate-700">NT$ <span id="stats-value">0</span></h3>
+                    </div>
                 </div>
-              </div>
-              <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-10 rounded-[40px] text-white shadow-2xl shadow-blue-200">
-                <Target size={32} className="mb-6" />
-                <h3 className="text-2xl font-black mb-4">智慧投資建議</h3>
-                <p className="text-blue-100 mb-8 font-medium leading-relaxed">系統偵測到您的帳號中有多項未鑑定資產。建議您上傳鑑定證書，可提升雲端資產估值的精準度約 25%。</p>
-                <button onClick={triggerUpload} className="w-full bg-white text-blue-700 py-4 rounded-2xl font-black hover:bg-blue-50 transition-all">立即上傳證書</button>
-              </div>
             </div>
-          )}
-        </div>
-      </main>
-    </div>
-  );
-};
 
-export default App;
+            <!-- Collections Tab -->
+            <div id="tab-collections" class="tab-content space-y-8">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-2xl font-black">個人資產庫 <span id="col-count-title">(0)</span></h2>
+                    <button onclick="document.getElementById('file-input').click()" class="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black text-sm flex items-center space-x-2 hover:bg-blue-700 transition-all shadow-xl shadow-blue-100">
+                        <i data-lucide="plus"></i><span>新增雲端資產</span>
+                    </button>
+                </div>
+                <div id="collections-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                    <!-- Cards will be injected here -->
+                </div>
+            </div>
+
+            <!-- Wishlist Tab -->
+            <div id="tab-wishlist" class="tab-content text-center py-24">
+                <i data-lucide="heart" class="mx-auto text-slate-200 mb-4" size="64"></i>
+                <p class="text-slate-400 font-black uppercase tracking-widest">願望清單目前為空</p>
+            </div>
+
+            <!-- Analysis Tab -->
+            <div id="tab-analysis" class="tab-content space-y-8">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white p-10 rounded-[40px] border border-slate-50 shadow-sm">
+                        <h3 class="font-black text-xl mb-6 flex items-center space-x-2"><i data-lucide="pie-chart" class="text-blue-600"></i><span>資產類別佔比</span></h3>
+                        <div class="h-64 flex items-center justify-center bg-slate-50 rounded-[32px] border-2 border-dashed border-slate-100">
+                            <p class="text-slate-400 font-bold text-sm">正在分析市場動態數據...</p>
+                        </div>
+                    </div>
+                    <div class="bg-gradient-to-br from-blue-600 to-blue-800 p-10 rounded-[40px] text-white">
+                        <i data-lucide="target" class="mb-6" size="32"></i>
+                        <h3 class="text-2xl font-black mb-4">智慧投資建議</h3>
+                        <p class="text-blue-100 mb-8 leading-relaxed">我們偵測到您的收藏中「鐘錶類」的市場價值正在上升，建議定期更新鑑定報告以維持資產正確估值。</p>
+                        <button class="w-full bg-white text-blue-700 py-4 rounded-2xl font-black hover:bg-blue-50 transition-all">生成完整報告</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <input type="file" id="file-input" class="hidden" accept="image/*">
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAV1feMf2mG9yTHN4bnvTSCUwB6VyWSakM",
+            authDomain: "owen-a263b.firebaseapp.com",
+            projectId: "owen-a263b",
+            storageBucket: "owen-a263b.firebasestorage.app",
+            messagingSenderId: "1013481513026",
+            appId: "1:1013481513026:web:afda76b6571506a4734ddb",
+            measurementId: "G-JEMCSLPLT2"
+        };
+
+        // 初始化
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "default-app-id";
+
+        let currentUser = null;
+
+        // UI 切換邏輯
+        window.switchTab = (tabId) => {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(nav => {
+                nav.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
+                nav.classList.add('text-gray-500', 'hover:bg-gray-100');
+            });
+
+            document.getElementById(`tab-${tabId}`).classList.add('active');
+            const activeNav = document.getElementById(`nav-${tabId}`);
+            activeNav.classList.remove('text-gray-500', 'hover:bg-gray-100');
+            activeNav.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
+        };
+
+        // 通知切換
+        const showNotif = (text, isSuccess = false) => {
+            const el = document.getElementById('notification');
+            const card = document.getElementById('notification-card');
+            const spinner = document.getElementById('notif-spinner');
+            const icon = document.getElementById('notif-icon');
+            const txt = document.getElementById('notif-text');
+
+            el.classList.remove('hidden');
+            txt.innerText = text;
+
+            if (isSuccess) {
+                spinner.classList.add('hidden');
+                icon.classList.remove('hidden');
+                card.classList.add('border-green-500');
+                txt.classList.replace('text-blue-600', 'text-green-600');
+                setTimeout(() => el.classList.add('hidden'), 3000);
+            } else {
+                spinner.classList.remove('hidden');
+                icon.classList.add('hidden');
+                card.classList.remove('border-green-500');
+                txt.classList.add('text-blue-600');
+            }
+        };
+
+        // 監聽登入狀態
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('user-name').innerText = user.displayName || (user.isAnonymous ? "訪客模式" : "已登入用戶");
+                document.getElementById('welcome-name').innerText = user.displayName || "收藏家";
+                document.getElementById('user-avatar').src = user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`;
+                
+                updateAuthButton(true);
+                startDataListener(user.uid);
+            } else {
+                signInAnonymously(auth);
+            }
+        });
+
+        const updateAuthButton = (isLoggedIn) => {
+            const container = document.getElementById('auth-section');
+            if (isLoggedIn && !auth.currentUser.isAnonymous) {
+                container.innerHTML = `
+                    <button onclick="handleLogout()" class="w-full flex items-center justify-center space-x-2 p-4 bg-slate-100 rounded-2xl text-slate-600 font-bold hover:bg-red-50 hover:text-red-600 transition-all">
+                        <i data-lucide="log-out"></i>
+                        <span>登出系統</span>
+                    </button>
+                `;
+            } else {
+                container.innerHTML = `
+                    <button onclick="handleLogin()" class="w-full flex items-center justify-center space-x-2 p-4 bg-blue-600 rounded-2xl text-white font-bold hover:bg-blue-700 shadow-lg transition-all">
+                        <i data-lucide="log-in"></i>
+                        <span>Google 登入同步</span>
+                    </button>
+                `;
+            }
+            lucide.createIcons();
+        };
+
+        window.handleLogin = async () => {
+            const provider = new GoogleAuthProvider();
+            try { await signInWithPopup(auth, provider); } catch(e) { console.error(e); }
+        };
+
+        window.handleLogout = () => signOut(auth);
+
+        // 資料監聽
+        const startDataListener = (uid) => {
+            const colRef = collection(db, 'artifacts', appId, 'users', uid, 'collections');
+            onSnapshot(colRef, (snapshot) => {
+                const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderCollections(data);
+                updateStats(data);
+            });
+        };
+
+        const renderCollections = (data) => {
+            const grid = document.getElementById('collections-grid');
+            document.getElementById('col-count-title').innerText = `(${data.length})`;
+            grid.innerHTML = data.map(item => `
+                <div class="bg-white rounded-[32px] shadow-sm border border-slate-50 overflow-hidden group hover:shadow-xl transition-all animate-in fade-in zoom-in duration-300">
+                    <div class="h-56 relative overflow-hidden bg-slate-100">
+                        <img src="${item.img}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700">
+                        <div class="absolute bottom-4 left-4 flex space-x-1">
+                            ${(item.tags || []).map(tag => `<span class="text-[10px] font-black bg-black/50 text-white px-2 py-1 rounded-md backdrop-blur-sm uppercase">${tag}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <h4 class="font-black text-slate-800 mb-4 truncate">${item.title}</h4>
+                        <div class="flex justify-between items-center border-t border-slate-50 pt-4">
+                            <span class="text-xs font-bold text-slate-400">${item.date}</span>
+                            <span class="text-blue-600 font-black text-sm">${item.price || 'NT$ 0'}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            if (data.length === 0) {
+                grid.innerHTML = `<div class="col-span-full py-24 text-center text-slate-300">目前尚無收藏，點擊上方按鈕開始新增</div>`;
+            }
+        };
+
+        const updateStats = (data) => {
+            document.getElementById('stats-count').innerText = data.length;
+            const total = data.reduce((acc, curr) => {
+                const val = parseInt(String(curr.price).replace(/[^0-9]/g, '')) || 0;
+                return acc + val;
+            }, 0);
+            document.getElementById('stats-value').innerText = total.toLocaleString();
+        };
+
+        // 檔案處理
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file || !currentUser) return;
+
+            showNotif(`處理中: ${file.name}`);
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'collections'), {
+                        title: file.name.split('.')[0],
+                        img: reader.result,
+                        date: new Date().toISOString().split('T')[0],
+                        price: "NT$ 待鑑定",
+                        tags: ["新上傳", "雲端備份"],
+                        timestamp: Date.now()
+                    });
+                    showNotif("已成功同步至雲端", true);
+                } catch (err) {
+                    console.error(err);
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // 初始化圖標
+        lucide.createIcons();
+
+    </script>
+</body>
+</html>
